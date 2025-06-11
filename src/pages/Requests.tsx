@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Heart, Calendar, Clock, AlertTriangle, Users } from 'lucide-react';
+import { Plus, Heart, Calendar, Clock, AlertTriangle, Users, Search } from 'lucide-react';
 
 export default function Requests() {
   const { token } = useAuth();
@@ -8,6 +8,9 @@ export default function Requests() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showMatchesModal, setShowMatchesModal] = useState<number | null>(null);
+  const [matches, setMatches] = useState([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
   const [formData, setFormData] = useState({
     type: 'blood',
     organType: '',
@@ -83,6 +86,9 @@ export default function Requests() {
   };
 
   const findMatches = async (requestId: number) => {
+    setLoadingMatches(true);
+    setShowMatchesModal(requestId);
+    
     try {
       const response = await fetch(`http://localhost:3001/api/matching/find-matches/${requestId}`, {
         headers: {
@@ -91,13 +97,43 @@ export default function Requests() {
       });
 
       if (response.ok) {
-        const matches = await response.json();
-        console.log('Found matches:', matches);
-        // Here you would typically show matches in a modal or navigate to matches page
-        alert(`Found ${matches.length} potential matches!`);
+        const matchesData = await response.json();
+        setMatches(matchesData);
       }
     } catch (error) {
       console.error('Failed to find matches:', error);
+    } finally {
+      setLoadingMatches(false);
+    }
+  };
+
+  const createMatch = async (donationId: number, requestId: number, compatibilityScore: number, distance: number) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/matching/create-match', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          donationId,
+          requestId,
+          compatibilityScore,
+          distance
+        }),
+      });
+
+      if (response.ok) {
+        alert('Match created successfully! You can view it in the Matches section.');
+        setShowMatchesModal(null);
+        fetchRequests(); // Refresh requests
+      } else {
+        const error = await response.json();
+        alert(`Failed to create match: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to create match:', error);
+      alert('Failed to create match. Please try again.');
     }
   };
 
@@ -118,6 +154,12 @@ export default function Requests() {
       case 'low': return 'text-gray-600 bg-gray-100';
       default: return 'text-gray-600 bg-gray-100';
     }
+  };
+
+  const getCompatibilityColor = (score: number) => {
+    if (score >= 80) return 'text-green-600';
+    if (score >= 60) return 'text-yellow-600';
+    return 'text-red-600';
   };
 
   if (loading) {
@@ -367,7 +409,7 @@ export default function Requests() {
                         onClick={() => findMatches(request.id)}
                         className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                       >
-                        <Users className="h-4 w-4" />
+                        <Search className="h-4 w-4" />
                         <span>Find Matches</span>
                       </button>
                     </div>
@@ -390,6 +432,86 @@ export default function Requests() {
           </div>
         )}
       </div>
+
+      {/* Matches Modal */}
+      {showMatchesModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-semibold text-gray-900">Available Matches</h3>
+              <button
+                onClick={() => setShowMatchesModal(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {loadingMatches ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
+              </div>
+            ) : matches.length > 0 ? (
+              <div className="space-y-4">
+                {matches.map((match: any, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-3">
+                          <h4 className="font-semibold text-gray-900">
+                            {match.donation.type} {match.donation.bloodType || match.donation.organType}
+                          </h4>
+                          <span className={`text-lg font-bold ${getCompatibilityColor(match.compatibilityScore)}`}>
+                            {match.compatibilityScore}% match
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600 mb-3">
+                          <div>
+                            <strong>Donor:</strong> {match.donor.name}
+                          </div>
+                          <div>
+                            <strong>Location:</strong> {match.donor.location}
+                          </div>
+                          <div>
+                            <strong>Distance:</strong> {match.distance} km
+                          </div>
+                          <div>
+                            <strong>Quantity:</strong> {match.donation.quantity} {match.donation.unit}
+                          </div>
+                          <div>
+                            <strong>Urgency:</strong> {match.donation.urgency}
+                          </div>
+                          <div>
+                            <strong>Contact:</strong> {match.donor.phone}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={() => createMatch(
+                          match.donationId,
+                          match.requestId,
+                          match.compatibilityScore,
+                          match.distance
+                        )}
+                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors ml-4"
+                      >
+                        Create Match
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No compatible matches found at this time.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

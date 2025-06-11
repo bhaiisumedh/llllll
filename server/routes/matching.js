@@ -39,6 +39,11 @@ function calculateCompatibilityScore(donation, request, donorLocation, recipient
     score += 40;
   }
 
+  // Tissue type match (40 points)
+  if (donation.type === 'tissue' && donation.organ_type === request.organ_type) {
+    score += 40;
+  }
+
   // Urgency match (20 points)
   const urgencyScores = { critical: 20, high: 15, normal: 10, low: 5 };
   score += urgencyScores[request.urgency] || 0;
@@ -135,9 +140,18 @@ router.post('/create-match', (req, res) => {
   try {
     const { donationId, requestId, compatibilityScore, distance } = req.body;
 
+    // Check if match already exists
+    const existingMatch = db.prepare(`
+      SELECT id FROM matches WHERE donation_id = ? AND request_id = ?
+    `).get(donationId, requestId);
+
+    if (existingMatch) {
+      return res.status(400).json({ error: 'Match already exists' });
+    }
+
     const stmt = db.prepare(`
-      INSERT INTO matches (donation_id, request_id, compatibility_score, distance_km)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO matches (donation_id, request_id, compatibility_score, distance_km, status)
+      VALUES (?, ?, ?, ?, 'pending')
     `);
 
     const result = stmt.run(donationId, requestId, compatibilityScore, distance);
@@ -147,11 +161,13 @@ router.post('/create-match', (req, res) => {
 
     // Emit real-time notification
     const io = req.app.get('io');
-    io.emit('match-created', {
-      matchId: result.lastInsertRowid,
-      donationId,
-      requestId
-    });
+    if (io) {
+      io.emit('match-created', {
+        matchId: result.lastInsertRowid,
+        donationId,
+        requestId
+      });
+    }
 
     res.status(201).json({
       message: 'Match created successfully',
@@ -204,11 +220,13 @@ router.put('/accept-match/:matchId', (req, res) => {
 
     // Emit real-time notification
     const io = req.app.get('io');
-    io.emit('match-accepted', {
-      matchId,
-      donationId: match.donation_id,
-      requestId: match.request_id
-    });
+    if (io) {
+      io.emit('match-accepted', {
+        matchId,
+        donationId: match.donation_id,
+        requestId: match.request_id
+      });
+    }
 
     res.json({ message: 'Match accepted successfully' });
   } catch (error) {
@@ -256,11 +274,13 @@ router.put('/decline-match/:matchId', (req, res) => {
 
     // Emit real-time notification
     const io = req.app.get('io');
-    io.emit('match-declined', {
-      matchId,
-      donationId: match.donation_id,
-      requestId: match.request_id
-    });
+    if (io) {
+      io.emit('match-declined', {
+        matchId,
+        donationId: match.donation_id,
+        requestId: match.request_id
+      });
+    }
 
     res.json({ message: 'Match declined successfully' });
   } catch (error) {
@@ -273,10 +293,13 @@ router.put('/decline-match/:matchId', (req, res) => {
 router.get('/my-matches', (req, res) => {
   try {
     const matches = db.prepare(`
-      SELECT m.*, d.type, d.organ_type, d.blood_type, d.quantity, d.unit,
+      SELECT m.*, 
+             d.type, d.organ_type, d.blood_type, d.quantity, d.unit,
              r.urgency, r.medical_justification,
-             donor.first_name as donor_name, donor.phone as donor_phone,
-             recipient.first_name as recipient_name, recipient.phone as recipient_phone
+             donor.first_name as donor_first_name, donor.last_name as donor_last_name,
+             donor.email as donor_email, donor.phone as donor_phone,
+             recipient.first_name as recipient_first_name, recipient.last_name as recipient_last_name,
+             recipient.email as recipient_email, recipient.phone as recipient_phone
       FROM matches m
       JOIN donations d ON m.donation_id = d.id
       JOIN requests r ON m.request_id = r.id
@@ -321,6 +344,15 @@ router.post('/auto-match/:requestId', (req, res) => {
     let matchesCreated = 0;
 
     for (const donation of donations) {
+      // Check if match already exists
+      const existingMatch = db.prepare(`
+        SELECT id FROM matches WHERE donation_id = ? AND request_id = ?
+      `).get(donation.id, request.id);
+
+      if (existingMatch) {
+        continue; // Skip if match already exists
+      }
+
       const compatibility = calculateCompatibilityScore(
         donation,
         request,
@@ -331,8 +363,8 @@ router.post('/auto-match/:requestId', (req, res) => {
       if (compatibility.score > 60) { // Higher threshold for auto-matching
         // Create the match
         const stmt = db.prepare(`
-          INSERT INTO matches (donation_id, request_id, compatibility_score, distance_km)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO matches (donation_id, request_id, compatibility_score, distance_km, status)
+          VALUES (?, ?, ?, ?, 'pending')
         `);
 
         stmt.run(donation.id, request.id, compatibility.score, compatibility.distance);

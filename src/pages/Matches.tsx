@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Users, Heart, MapPin, Clock, Star, Phone, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 export default function Matches() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
@@ -154,7 +154,7 @@ export default function Matches() {
                           <div className="space-y-2 text-sm text-gray-600">
                             <div className="flex items-center space-x-2">
                               <Users className="h-4 w-4" />
-                              <span>{match.donor_name}</span>
+                              <span>{match.donor_first_name} {match.donor_last_name}</span>
                             </div>
                             <div className="flex items-center space-x-2">
                               <Phone className="h-4 w-4" />
@@ -168,7 +168,7 @@ export default function Matches() {
                           <div className="space-y-2 text-sm text-gray-600">
                             <div className="flex items-center space-x-2">
                               <Users className="h-4 w-4" />
-                              <span>{match.recipient_name}</span>
+                              <span>{match.recipient_first_name} {match.recipient_last_name}</span>
                             </div>
                             <div className="flex items-center space-x-2">
                               <Phone className="h-4 w-4" />
